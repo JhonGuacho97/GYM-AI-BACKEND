@@ -1,0 +1,102 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model user_profiles {
+  user_id         String   @id @db.Uuid
+  goal            String   @db.VarChar(20)
+  experience      String   @db.VarChar(20)
+  days_per_week   Int
+  session_length  Int
+  equipment       String   @db.VarChar(20)
+  injuries        String?
+  preferred_split String   @db.VarChar(20)
+  age             Int?
+  gender          String?  @db.VarChar(10)
+  height_cm       Float?
+  weight_kg       Float?
+  updated_at      DateTime @default(now()) @db.Timestamptz(6)
+}
+
+model training_plans {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String   @db.Uuid
+  plan_json  Json
+  plan_text  String
+  version    Int      @default(1)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  workout_sessions workout_sessions[]
+
+  @@index([user_id], map: "idx_training_plans_user_id")
+}
+
+model workout_sessions {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id      String   @db.Uuid
+  plan_id      String   @db.Uuid
+  day_name     String   @db.VarChar(20)
+  notes        String?
+  completed_at DateTime @default(now()) @db.Timestamptz(6)
+
+  plan      training_plans    @relation(fields: [plan_id], references: [id])
+  exercises session_exercises[]
+
+  @@index([user_id], map: "idx_workout_sessions_user_id")
+}
+
+model session_exercises {
+  id             String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  session_id     String  @db.Uuid
+  exercise_name  String  @db.VarChar(100)
+  sets_completed Int
+  reps_completed String  @db.VarChar(50)
+  weight_kg      Float?
+  rpe_actual     Int?
+
+  session workout_sessions @relation(fields: [session_id], references: [id], onDelete: Cascade)
+
+  @@index([session_id], map: "idx_session_exercises_session_id")
+}
+
+model nutrition_goals {
+  user_id         String   @id @db.Uuid
+  calories_target Int
+  protein_g       Int
+  carbs_g         Int
+  fat_g           Int
+  calculated_at   DateTime @default(now()) @db.Timestamptz(6)
+}
+
+
+
+model food_logs {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id   String   @db.Uuid
+  name      String   @db.VarChar(200)
+  calories  Int
+  protein_g Float
+  carbs_g   Float
+  fat_g     Float
+  meal_type String   @db.VarChar(20)
+  logged_at DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([user_id], map: "idx_food_logs_user_id")
+}
+
+model body_measurements {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id      String   @db.Uuid
+  weight_kg    Float
+  body_fat_pct Float?
+  waist_cm     Float?
+  notes        String?
+  measured_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([user_id], map: "idx_body_measurements_user_id")
+}
