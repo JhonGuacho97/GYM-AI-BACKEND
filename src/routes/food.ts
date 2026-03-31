@@ -23,7 +23,7 @@ foodRouter.post("/estimate", async (req: Request, res: Response) => {
     });
 
     const completion = await openai.chat.completions.create({
-      model: "openrouter/free",
+      model: "meta-llama/llama-3.3-70b-instruct:free",
       messages: [
         {
           role: "system",
