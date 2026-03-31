@@ -7,7 +7,6 @@ dotenv.config();
 export async function generateTrainingPlan(
   profile: UserProfile | Record<string, any>,
 ): Promise<Omit<TrainingPlan, "id" | "userId" | "version" | "createdAt">> {
-
   // Normalizar los datos del perfil del usuario
   const normalizedProfile: UserProfile = {
     goal: profile.goal || "bulk",
@@ -22,7 +21,9 @@ export async function generateTrainingPlan(
   const apiKey = process.env.OPEN_ROUTER_KEY;
 
   if (!apiKey) {
-    throw new Error("OPEN_ROUTER_KEY no está configurada en las variables de entorno");
+    throw new Error(
+      "OPEN_ROUTER_KEY no está configurada en las variables de entorno",
+    );
   }
 
   const openai = new OpenAI({
@@ -39,19 +40,43 @@ export async function generateTrainingPlan(
 
   try {
     const completion = await openai.chat.completions.create({
-      model: "nvidia/nemotron-nano-12b-v2-vl:free",
+      model: "openrouter/free",
       messages: [
         {
           role: "system",
-          content:
-            "Eres un experto entrenador personal y diseñador de programas de entrenamiento. Debes responder ÚNICAMENTE con un JSON válido. No incluyas markdown, razonamientos ni texto adicional.",
+          content: `
+Eres un entrenador personal experto en diseño de rutinas.
+
+REGLAS ESTRICTAS:
+- Responde SOLO con JSON válido
+- NO uses markdown
+- NO agregues texto fuera del JSON
+- TODOS los números deben ser tipo number
+- NO cambies los nombres de las propiedades
+- SI el JSON es inválido, corrígelo antes de responder
+
+ESTRUCTURA:
+- weeklySchedule debe tener EXACTAMENTE ${normalizedProfile.days_per_week} días
+- Cada día debe tener ENTRE 4 y 6 ejercicios (NO MÁS, NO MENOS)
+- Cada ejercicio debe tener TODOS los campos requeridos
+
+CONSISTENCIA:
+- El split debe coincidir con la distribución de días
+- El contenido debe respetar el nivel del usuario
+
+IMPORTANTE:
+- Usa nombres de ejercicios simples y comerciales de gimnasio
+- Evita terminología técnica o anatómica
+
+El JSON debe poder parsearse con JSON.parse sin errores.
+`,
         },
         {
           role: "user",
           content: prompt,
         },
       ],
-      temperature: 0.7,
+      temperature: 0.5,
       response_format: { type: "json_object" },
     });
 
@@ -65,7 +90,33 @@ export async function generateTrainingPlan(
       throw new Error("No hay contenido en la respuesta de la IA");
     }
 
-    const planData = JSON.parse(content);
+    let planData;
+
+    try {
+      planData = JSON.parse(content);
+    } catch (err) {
+      console.error("JSON inválido:", content);
+      throw new Error("Respuesta inválida de IA");
+    }
+
+    // validaciones fuertes
+    if (!planData.weeklySchedule || !Array.isArray(planData.weeklySchedule)) {
+      throw new Error("weeklySchedule inválido");
+    }
+
+    if (planData.weeklySchedule.length !== normalizedProfile.days_per_week) {
+      throw new Error("Número incorrecto de días");
+    }
+
+    for (const day of planData.weeklySchedule) {
+      if (
+        !day.exercises ||
+        day.exercises.length < 4 ||
+        day.exercises.length > 6
+      ) {
+        throw new Error("Número inválido de ejercicios");
+      }
+    }
 
     return formatPlanResponse(planData, normalizedProfile);
   } catch (error) {
@@ -80,7 +131,9 @@ function formatPlanResponse(
 ): Omit<TrainingPlan, "id" | "userId" | "version" | "createdAt"> {
   const plan: Omit<TrainingPlan, "id" | "userId" | "version" | "createdAt"> = {
     overview: {
-      goal: aiResponse.overview?.goal || `Programa personalizado de ${profile.goal}`,
+      goal:
+        aiResponse.overview?.goal ||
+        `Programa personalizado de ${profile.goal}`,
       frequency:
         aiResponse.overview?.frequency ||
         `${profile.days_per_week} días por semana`,
@@ -136,92 +189,60 @@ function buildPrompt(profile: UserProfile): string {
     custom: "la mejor división para sus objetivos",
   };
 
-  return `Crea un plan de entrenamiento personalizado de ${profile.days_per_week} días por semana para alguien con el siguiente perfil:
+  return `
+Genera un plan de entrenamiento.
 
-Objetivo: ${goalMap[profile.goal] || profile.goal}
-Nivel de Experiencia: ${experienceMap[profile.experience] || profile.experience}
-Duración de la Sesión: ${profile.session_length} minutos por sesión
-Equipamiento: ${equipmentMap[profile.equipment] || profile.equipment}
-División Preferida: ${splitMap[profile.preferred_split] || profile.preferred_split}
-${profile.injuries ? `Lesiones/Limitaciones: ${profile.injuries}` : ""}
+DATOS:
+- Días por semana: ${profile.days_per_week}
+- Objetivo: ${goalMap[profile.goal] || profile.goal}
+- Nivel: ${experienceMap[profile.experience] || profile.experience}
+- Duración máxima por sesión: ${profile.session_length} minutos
+- Equipamiento: ${equipmentMap[profile.equipment] || profile.equipment}
+- Split: ${splitMap[profile.preferred_split] || profile.preferred_split}
+${profile.injuries ? `- Lesiones: ${profile.injuries}` : ""}
 
-Genera un plan de entrenamiento completo en formato JSON con esta estructura exacta:
+FORMATO JSON EXACTO:
 {
   "overview": {
-    "goal": "breve descripción del objetivo del entrenamiento",
-    "frequency": "X días por semana",
-    "split": "nombre de la división de entrenamiento",
-    "notes": "notas importantes sobre el programa (2-3 frases)"
+    "goal": string,
+    "frequency": string,
+    "split": string,
+    "notes": string
   },
   "weeklySchedule": [
     {
-      "day": "Lunes",
-      "focus": "grupo muscular o área de enfoque",
+      "day": string,
+      "focus": string,
       "exercises": [
         {
-          "name": "Nombre del Ejercicio",
-          "sets": 4,
-          "reps": "6-8",
-          "rest": "2-3 min",
-          "rpe": 8,
-          "notes": "consejos técnicos o tips (opcional)",
-          "alternatives": ["Alternativa 1", "Alternativa 2"]
+          "name": string,
+          "sets": number,
+          "reps": string,
+          "rest": string,
+          "rpe": number,
+          "notes": string,
+          "alternatives": [string]
         }
       ]
     }
   ],
-  "progression": "estrategia detallada de progresión (2-3 frases explicando cómo progresar)"
+  "progression": string
 }
 
-REGLAS CRÍTICAS SOBRE LOS EJERCICIOS (MUY IMPORTANTE):
-- Usa nombres SIMPLES, comunes y fáciles de entender por cualquier persona.
-- NO uses terminología anatómica o técnica compleja.
-- NO uses palabras como “flexión de”, “extensión de codo”, “aducción”, etc.
-- Usa nombres populares de gimnasio.
+REGLAS:
+- EXACTAMENTE ${profile.days_per_week} días en weeklySchedule
+- EXACTAMENTE entre 4 y 6 ejercicios por día
+- RPE entre 6 y 9
+- NO repetir ejercicios dentro del mismo día
+- Priorizar ejercicios compuestos
+- Mantener coherencia con el split
+${profile.injuries ? `- NO incluir ejercicios que afecten: ${profile.injuries}` : ""}
 
-Ejemplos correctos:
-- "Press de banca plano"
-- "Press de banca inclinado"
-- "Press inclinado con mancuernas"
-- "Press Plano con mancuernas"
-- "Cruces en polea alta"
-- "Cruces en polea baja"
-- "Sentadilla"
-- "Sentadilla Smith"
-- "Sentadilla búlgara"
-- "Peso muerto"
-- "Fondos de tríceps en máquina"
-- "Dominadas"
-- "Curl de bíceps con mancuernas"
-- "Curl de bíceps en polea"
-- "Curl de bíceps martillo"
-- "Curl de bíceps predicador"
-- "Extensiones de tríceps en polea"
-- "Elevaciones laterales"
-- "Elevaciones frontales"
-- "Elevaciones posteriores"
+REGLAS DE NOMBRES:
+- Usar nombres simples de gimnasio
+- Siempre especificar implemento (barra, mancuerna, máquina)
+- NO usar términos técnicos
 
-Ejemplos incorrectos (PROHIBIDOS):
-- "Extensión de codo en polea alta"
-- "Flexión horizontal de hombro"
-- "Aducción escapular en máquina"
-
-REGLAS ADICIONALES:
-- Evita nombres ambiguos como "Remo" → usa "Remo con barra" o "Remo con mancuerna"
-- Siempre especifica el implemento si aplica (barra, mancuerna, máquina)
-- Prioriza ejercicios conocidos en gimnasio comercial
-- Si el ejercicio es poco común, reemplázalo por uno más estándar
-- Las alternativas también deben seguir estas reglas
-
-REQUISITOS:
-- Crea exactamente ${profile.days_per_week} días de entrenamiento
-- Cada entrenamiento debe durar máximo ${profile.session_length} minutos
-- Incluye entre 4 y 6 ejercicios por sesión
-- El RPE debe estar entre 6 y 9
-- Usa movimientos compuestos principalmente
-- Respeta el tipo de división: ${profile.preferred_split}
-${profile.injuries ? `- EVITA ejercicios que puedan agravar: ${profile.injuries}` : ""}
-- Hazlo progresivo y adecuado para el nivel ${experienceMap[profile.experience] || profile.experience}
-
-Devuelve ÚNICAMENTE el objeto JSON (sin markdown, sin texto extra).`;
+Si el resultado no cumple TODAS las reglas, corrígelo antes de responder.
+`;
 }

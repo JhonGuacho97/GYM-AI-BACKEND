@@ -10,7 +10,8 @@ export const foodRouter = Router();
 foodRouter.post("/estimate", async (req: Request, res: Response) => {
   try {
     const { description } = req.body;
-    if (!description) return res.status(400).json({ error: "Descripción requerida" });
+    if (!description)
+      return res.status(400).json({ error: "Descripción requerida" });
 
     const openai = new OpenAI({
       apiKey: process.env.OPEN_ROUTER_KEY,
@@ -22,24 +23,46 @@ foodRouter.post("/estimate", async (req: Request, res: Response) => {
     });
 
     const completion = await openai.chat.completions.create({
-      model: "nvidia/nemotron-nano-12b-v2-vl:free",
+      model: "openrouter/free",
       messages: [
         {
           role: "system",
-          content: "Eres un nutricionista experto. Responde ÚNICAMENTE con un objeto JSON válido. Sin markdown ni texto adicional.",
+          content: `
+          Eres un nutricionista experto en estimación de calorías.
+
+          REGLAS ESTRICTAS:
+          - Responde SOLO con JSON válido
+          - NO agregues texto, explicaciones ni markdown
+          - NO uses comillas en números
+          - TODOS los números deben ser tipo number
+          - Si no sabes algo, estima valores razonables
+          - Usa porciones estándar (200-300g) si no se especifica
+
+          El JSON debe ser válido para JSON.parse sin errores.
+          `,
         },
         {
           role: "user",
-          content: `Estima los valores nutricionales para: "${description}". 
-          Devuelve SOLO este JSON:
-          {
-            "name": "nombre normalizado del plato",
-            "calories": número entero,
-            "protein_g": número decimal,
-            "carbs_g": número decimal,
-            "fat_g": número decimal,
-            "notes": "nota breve sobre la estimación (ej: porción estándar de 250g)"
-          }`,
+          content: `
+Estima los valores nutricionales para: "${description}"
+
+Responde EXACTAMENTE con este formato:
+
+{
+  "name": string,
+  "calories": number,
+  "protein_g": number,
+  "carbs_g": number,
+  "fat_g": number,
+  "notes": string
+}
+
+REGLAS:
+- calories debe ser entero
+- protein_g, carbs_g, fat_g deben ser decimales
+- name debe ser claro y normalizado
+- notes debe ser breve (máx 15 palabras)
+`,
         },
       ],
       temperature: 0.3,
@@ -47,20 +70,38 @@ foodRouter.post("/estimate", async (req: Request, res: Response) => {
     });
 
     const content = completion.choices[0].message.content;
-    if (!content) return res.status(500).json({ error: "Sin respuesta de la IA" });
+    if (!content)
+      return res.status(500).json({ error: "Sin respuesta de la IA" });
 
-    const data = JSON.parse(content);
+    let data;
+
+    try {
+      data = JSON.parse(content);
+    } catch {
+      return res.status(500).json({ error: "JSON inválido generado por IA" });
+    }
+
+    // validación manual básica
+    if (
+      typeof data.calories !== "number" ||
+      typeof data.protein_g !== "number"
+    ) {
+      return res.status(500).json({ error: "Formato incorrecto de IA" });
+    }
     res.json(data);
   } catch (error) {
     console.error("Error estimating food:", error);
-    res.status(500).json({ error: "Error al estimar los valores nutricionales" });
+    res
+      .status(500)
+      .json({ error: "Error al estimar los valores nutricionales" });
   }
 });
 
 // POST /api/food — guardar una comida
 foodRouter.post("/", async (req: Request, res: Response) => {
   try {
-    const { userId, name, calories, protein_g, carbs_g, fat_g, meal_type } = req.body;
+    const { userId, name, calories, protein_g, carbs_g, fat_g, meal_type } =
+      req.body;
     if (!userId || !name || calories == null) {
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
