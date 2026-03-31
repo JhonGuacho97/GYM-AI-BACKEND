@@ -40,7 +40,7 @@ export async function generateTrainingPlan(
 
   try {
     const completion = await openai.chat.completions.create({
-      model: "meta-llama/llama-3.3-70b-instruct:free",
+      model: "stepfun/step-3.5-flash:free",
       messages: [
         {
           role: "system",
